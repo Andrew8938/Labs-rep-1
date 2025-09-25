@@ -1,34 +1,11 @@
-a=5
-b=10
-c=a+b
-print(c)
+num = 100
 
-a=15
-b=7
-c=a-b
-print(c)
+# Цикл, который будет искать наибольшее число, делящееся на 3
+while num % 3 != 0:
+    num -= 1  # уменьшаем число на 1
 
-a=6
-b=4
-c=a*b
-print(c)
+print(f"Наибольшее число, которое делится на 3: {num}")
 
-a=20
-b=5
-c=a/b
-print(c)
 
-a=17
-b=3
-c=a//b
-print(c)
-
-a=17
-b=3
-c=a%b
-print(c)
-
-a=3
-b=4
-c=a**b
-print(c)
+for i in range(1, 11):
+    print(f"Квадрат числа {i} равен {i ** 2}")
