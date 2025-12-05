@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="ru">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Прогноз погоды</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #1e293b;
+            color: #f1f5f9;
+            font-family: 'Segoe UI', sans-serif;
+        }
+
+        .weather-cont {
+            max-width: 600px;
+            background-color: #334155;
+            border: 0.3rem solid #94a3b8;
+            border-radius: 1rem;
+            padding: 1.5rem;
+            margin: 2rem auto;
+        }
+
+        .city-search {
+            position: relative;
+            width: 100%;
+        }
+
+        .city-search input {
+            font-weight: 600;
+        }
+
+        .location {
+            position: absolute;
+            left: 0.8em;
+            top: 0.7em;
+        }
+
+        .city-name {
+            font-size: 1.8em;
+        }
+
+        .temp {
+            font-weight: bold;
+            font-size: 2.5em;
+        }
+
+        .temp-details {
+            margin-top: 1rem;
+        }
+
+        .temp-details p {
+            font-weight: 500;
+        }
+
+        .temp-extra p {
+            margin-bottom: 0.5rem;
+        }
+
+        .error-msg {
+            font-size: 1.5em;
+            color: #f87171;
+            font-weight: bold;
+        }
+
+        .submit-btn {
+            background-color: #0ea5e9;
+            border-color: #0ea5e9;
+            color: white;
+        }
+
+        .submit-btn:hover {
+            background-color: #0369a1;
+            border-color: #0369a1;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="weather-cont">
+        <h1 class="text-center mb-4">Прогноз погоды</h1>
+        <form action="" method="post" id="submit-form">
+            {% csrf_token %}
+            <div class="city-search d-flex flex-column align-items-center">
+                <input type="text" class="form-control px-5 mb-2" name="input-city" placeholder="Введите город"
+                    required>
+                <img class="location" src="/static/img/geo-alt.svg" alt="search" width="20" height="25">
+                <button type="submit" class="btn submit-btn">Узнать погоду</button>
+            </div>
+        </form>
+
+        <p class="text-center my-3" id="loading" style="display: none;"><b>Загрузка...</b></p>
+
+        <div class="weather-info my-3" id="weather"></div>
+    </div>
+
+    <!-- Скрипты -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.6.3.js"></script>
+
+    <script>
+        $('#submit-form').submit(function (event) {
+            event.preventDefault();
+            $('#loading').show();
+            $('#weather').empty();
+
+            var formData = {
+                'csrfmiddlewaretoken': $('input[name="csrfmiddlewaretoken"]').val(),
+                'city': $('input[name="input-city"]').val()
+            };
+
+            $.ajax({
+                type: 'POST',
+                url: '',
+                data: formData,
+                encode: true
+            }).done(function (data) {
+                var data = JSON.parse(data);
+                $('#weather').empty();
+                $('#loading').hide();
+
+                if (data['status'] === 'success') {
+                    let mystr = `
+                        <p class="text-center city-name m-0"><b>${data['city']}, ${data['country']}</b></p>
+                        <p class="text-center date-time"><i>${data['date_time']}</i></p>
+                        <div class="temp-details d-flex justify-content-between">
+                            <div class="temp-div">
+                                <p class="temp">${data['temp']}&#8451;</p>
+                                <p>${data['temp_F']}&#8457;</p>
+                                <p>${data['description']}</p>
+                            </div>
+                            <div class="temp-extra">
+                                <p>Влажность: ${data['humidity']}%</p>
+                                <p>Ощущается как: ${data['feels_like']}&#8451;</p>
+                                <p>Ветер: ${data['wind']} км/ч</p>
+                                <p>Видимость: ${data['visibility']} км</p>
+                            </div>
+                        </div>
+                    `;
+
+                    $('#weather').append(mystr);
+
+                    if (data['forecast']) {
+                        let forecastStr = `
+                            <hr>
+                            <h4 class="text-center mt-4">Прогноз на завтра (${data['forecast']['time'].split(" ")[0]}):</h4>
+                            <div class="temp-details d-flex justify-content-between">
+                                <div class="temp-div">
+                                    <p class="temp">${data['forecast']['temp']}&#8451;</p>
+                                    <p>${data['forecast']['description']}</p>
+                                </div>
+                                <div class="temp-extra">
+                                    <p>Влажность: ${data['forecast']['humidity']}%</p>
+                                    <p>Ощущается как: ${data['forecast']['feels_like']}&#8451;</p>
+                                    <p>Ветер: ${data['forecast']['wind']} км/ч</p>
+                                    <p>Видимость: ${data['forecast']['visibility']} км</p>
+                                </div>
+                            </div>
+                        `;
+                        $('#weather').append(forecastStr);
+                    }
+                } else if (data['status'] === 'notfound') {
+                    $('#weather').append(`<p class="text-center error-msg">Город не найден!</p>`);
+                } else {
+                    $('#weather').append(`<p class="text-center error-msg">Произошла ошибка при получении данных.</p>`);
+                }
+            });
+        });
+    </script>
+</body>
+
+</html>
