@@ -1,3 +1,5 @@
+/* style.css - Исправленная и улучшенная версия */
+
 * {
     margin: 0;
     padding: 0;
@@ -39,6 +41,7 @@ body {
     align-items: center;
     justify-content: center;
     gap: 15px;
+    flex-wrap: wrap;
 }
 
 .header p {
@@ -51,6 +54,7 @@ body {
     background-color: #2c3e50;
     display: flex;
     padding: 0;
+    flex-wrap: wrap;
 }
 
 .navbar a {
@@ -62,6 +66,9 @@ body {
     gap: 10px;
     transition: all 0.3s ease;
     font-weight: 500;
+    flex: 1;
+    min-width: 120px;
+    justify-content: center;
 }
 
 .navbar a:hover {
@@ -132,8 +139,9 @@ body {
     border-radius: 8px;
     margin-bottom: 25px;
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 15px;
+    line-height: 1.5;
 }
 
 .message.success {
@@ -146,6 +154,23 @@ body {
     background-color: #f8d7da;
     color: #721c24;
     border: 1px solid #f5c6cb;
+}
+
+.message.info {
+    background-color: #d1ecf1;
+    color: #0c5460;
+    border: 1px solid #bee5eb;
+}
+
+.message.warning {
+    background-color: #fff3cd;
+    color: #856404;
+    border: 1px solid #ffeaa7;
+}
+
+.message i {
+    flex-shrink: 0;
+    font-size: 1.2rem;
 }
 
 /* Формы */
@@ -196,13 +221,19 @@ body {
     border: 1px solid #ddd;
     border-radius: 6px;
     font-size: 1rem;
-    transition: border 0.3s;
+    transition: all 0.3s;
 }
 
 .form-group input:focus {
     outline: none;
     border-color: #3498db;
-    box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.2);
+    box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.2);
+}
+
+.form-group input:disabled {
+    background-color: #f5f5f5;
+    cursor: not-allowed;
+    opacity: 0.7;
 }
 
 .form-group small {
@@ -215,12 +246,18 @@ body {
     padding-top: 20px;
     border-top: 1px solid #eee;
     color: #555;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
 }
 
 .auth-links a {
     color: #3498db;
     text-decoration: none;
     font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }
 
 .auth-links a:hover {
@@ -232,6 +269,7 @@ body {
     background-color: #f8f9fa;
     padding: 30px;
     border-radius: 10px;
+    border-left: 5px solid #3498db;
 }
 
 .form-info h3 {
@@ -253,8 +291,17 @@ body {
 }
 
 .form-info li {
-    margin-bottom: 8px;
+    margin-bottom: 10px;
     line-height: 1.5;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+}
+
+.form-info li i {
+    color: #27ae60;
+    flex-shrink: 0;
+    margin-top: 2px;
 }
 
 .security-tip {
@@ -262,9 +309,16 @@ body {
     padding: 15px;
     border-radius: 8px;
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 15px;
     margin-top: 20px;
+}
+
+.security-tip i {
+    color: #3498db;
+    font-size: 1.2rem;
+    flex-shrink: 0;
+    margin-top: 2px;
 }
 
 /* Кнопки */
@@ -281,6 +335,7 @@ body {
     gap: 10px;
     transition: all 0.3s ease;
     text-decoration: none;
+    min-width: 120px;
 }
 
 .btn-primary {
@@ -288,10 +343,17 @@ body {
     color: white;
 }
 
-.btn-primary:hover {
+.btn-primary:hover:not(:disabled) {
     background-color: #2980b9;
     transform: translateY(-2px);
     box-shadow: 0 5px 15px rgba(52, 152, 219, 0.3);
+}
+
+.btn-primary:disabled {
+    background-color: #95a5a6;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
 }
 
 .btn-secondary {
@@ -304,10 +366,17 @@ body {
     transform: translateY(-2px);
 }
 
+.btn-small {
+    padding: 8px 15px;
+    font-size: 0.9rem;
+    min-width: auto;
+}
+
 .action-buttons {
     display: flex;
     gap: 15px;
     margin-top: 20px;
+    flex-wrap: wrap;
 }
 
 /* Панель управления */
@@ -338,6 +407,11 @@ body {
     box-shadow: 0 3px 10px rgba(0, 0, 0, 0.05);
     text-align: center;
     border-top: 3px solid #3498db;
+    transition: transform 0.3s ease;
+}
+
+.info-box:hover {
+    transform: translateY(-5px);
 }
 
 .info-box i {
@@ -350,6 +424,8 @@ body {
     font-size: 1rem;
     color: #7f8c8d;
     margin-bottom: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
 }
 
 .info-box p {
@@ -360,6 +436,10 @@ body {
 
 .status-active {
     color: #27ae60 !important;
+}
+
+.status-inactive {
+    color: #e74c3c !important;
 }
 
 .dashboard-content {
@@ -413,8 +493,15 @@ body {
     font-size: 0.9rem;
     margin-top: 20px;
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 10px;
+    line-height: 1.5;
+}
+
+.note i {
+    color: #f39c12;
+    flex-shrink: 0;
+    margin-top: 2px;
 }
 
 /* Футер */
@@ -431,6 +518,203 @@ body {
     margin-top: 5px;
 }
 
+/* Дополнительные стили из login.php */
+.timer {
+    margin-top: 10px;
+    padding: 10px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 5px;
+    text-align: center;
+}
+
+.timer i {
+    margin-right: 10px;
+    color: #3498db;
+}
+
+.warning-info {
+    background: #fff3cd;
+    border: 1px solid #ffeaa7;
+    color: #856404;
+    padding: 10px 15px;
+    border-radius: 5px;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 500;
+}
+
+.warning-info i {
+    color: #ffc107;
+    font-size: 1.1rem;
+}
+
+.remember-me {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 15px 0;
+}
+
+.remember-me input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    margin: 0;
+    cursor: pointer;
+}
+
+.remember-me label {
+    margin: 0;
+    font-weight: normal;
+    cursor: pointer;
+    user-select: none;
+}
+
+.recovery-options {
+    margin-top: 20px;
+    padding-top: 20px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.recovery-options h4 {
+    color: #2c3e50;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.recovery-options ul {
+    list-style: none;
+    padding-left: 0;
+}
+
+.recovery-options li {
+    margin-bottom: 10px;
+}
+
+.recovery-options a {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: #3498db;
+    text-decoration: none;
+    padding: 8px 12px;
+    border-radius: 5px;
+    transition: background-color 0.3s;
+}
+
+.recovery-options a:hover {
+    text-decoration: none;
+    background-color: rgba(52, 152, 219, 0.1);
+}
+
+.small {
+    font-size: 0.9rem;
+    opacity: 0.8;
+    margin-top: 5px;
+}
+
+/* Дополнительные классы для сообщений */
+.login-options {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin: 15px 0;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.security-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.attempts-warning {
+    color: #e74c3c;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.security-features {
+    margin-top: 20px;
+}
+
+.security-features h4 {
+    color: #2c3e50;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.security-features ul {
+    list-style: none;
+    padding-left: 0;
+}
+
+.security-features li {
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.security-features li i {
+    color: #27ae60;
+}
+
+/* Стили для полей формы с иконками */
+.form-group.with-icon {
+    position: relative;
+}
+
+.form-group.with-icon input {
+    padding-left: 40px;
+}
+
+.form-group.with-icon i {
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #7f8c8d;
+    font-size: 1.1rem;
+}
+
+/* Анимации */
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.welcome-card, .form-card, .dashboard-card, .info-box {
+    animation: fadeIn 0.5s ease-out;
+}
+
+@keyframes pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+    100% { transform: scale(1); }
+}
+
+.btn-primary:not(:disabled):hover {
+    animation: pulse 0.5s ease;
+}
+
+@keyframes slideIn {
+    from { opacity: 0; transform: translateX(-20px); }
+    to { opacity: 1; transform: translateX(0); }
+}
+
+.message {
+    animation: slideIn 0.3s ease;
+}
+
 /* Адаптивность */
 @media (max-width: 992px) {
     .welcome-section,
@@ -442,11 +726,17 @@ body {
     .user-info {
         grid-template-columns: repeat(2, 1fr);
     }
+    
+    .header h1 {
+        font-size: 2rem;
+    }
 }
 
 @media (max-width: 768px) {
     .header h1 {
-        font-size: 2rem;
+        font-size: 1.8rem;
+        flex-direction: column;
+        gap: 10px;
     }
     
     .navbar {
@@ -454,7 +744,13 @@ body {
     }
     
     .navbar a {
-        justify-content: center;
+        justify-content: flex-start;
+        padding: 15px 20px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    
+    .navbar a:last-child {
+        border-bottom: none;
     }
     
     .main-content {
@@ -468,14 +764,205 @@ body {
     .action-buttons {
         flex-direction: column;
     }
+    
+    .auth-form-container {
+        gap: 20px;
+    }
+    
+    .form-card, .form-info {
+        padding: 20px;
+    }
 }
 
-/* Анимации */
-@keyframes fadeIn {
-    from { opacity: 0; transform: translateY(20px); }
-    to { opacity: 1; transform: translateY(0); }
+@media (max-width: 480px) {
+    body {
+        padding: 10px;
+    }
+    
+    .container {
+        border-radius: 10px;
+    }
+    
+    .header {
+        padding: 20px;
+    }
+    
+    .main-content {
+        padding: 20px;
+    }
+    
+    .welcome-section {
+        gap: 20px;
+    }
+    
+    .btn {
+        width: 100%;
+        justify-content: center;
+    }
+    
+    .action-buttons a {
+        width: 100%;
+    }
 }
 
-.welcome-card, .form-card, .dashboard-card {
-    animation: fadeIn 0.5s ease-out;
+/* Стили для скроллбара */
+::-webkit-scrollbar {
+    width: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #3498db;
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #2980b9;
+}
+
+/* Стили для выделения текста */
+::selection {
+    background-color: rgba(52, 152, 219, 0.3);
+    color: #2c3e50;
+}
+
+/* Стили для фокуса доступности */
+*:focus {
+    outline: 2px solid #3498db;
+    outline-offset: 2px;
+}
+
+/* Стили для отключенных состояний */
+input:disabled, button:disabled, select:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* Улучшенные стили для списков */
+ul, ol {
+    line-height: 1.6;
+}
+
+li {
+    margin-bottom: 8px;
+}
+
+/* Стили для кода */
+code {
+    background-color: #f8f9fa;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 0.9em;
+    color: #e74c3c;
+}
+
+/* Стили для уведомления о таймауте */
+.timeout-notification {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: linear-gradient(135deg, #f39c12 0%, #e74c3c 100%);
+    color: white;
+    padding: 15px 20px;
+    border-radius: 10px;
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    z-index: 1000;
+    max-width: 300px;
+    animation: slideInRight 0.3s ease-out;
+}
+
+.timeout-notification i {
+    font-size: 1.5rem;
+    color: white;
+}
+
+.timeout-notification strong {
+    font-size: 1rem;
+    display: block;
+    margin-bottom: 5px;
+}
+
+.timeout-notification p {
+    margin: 5px 0;
+    font-size: 0.9rem;
+    opacity: 0.9;
+}
+
+.timeout-notification button {
+    background: white;
+    color: #e74c3c;
+    border: none;
+    padding: 5px 15px;
+    border-radius: 4px;
+    font-weight: bold;
+    cursor: pointer;
+    margin-top: 5px;
+    transition: all 0.3s;
+}
+
+.timeout-notification button:hover {
+    background: #f5f5f5;
+    transform: translateY(-1px);
+}
+
+@keyframes slideInRight {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+/* Стили для информации о сессии */
+.session-info {
+    margin-top: 20px;
+    padding-top: 20px;
+    border-top: 1px solid #eee;
+}
+
+.session-info h4 {
+    color: #2c3e50;
+    margin-bottom: 15px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.session-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 15px;
+}
+
+.stat-item {
+    background: #f8f9fa;
+    padding: 12px;
+    border-radius: 6px;
+    border-left: 3px solid #3498db;
+}
+
+.stat-label {
+    display: block;
+    font-size: 0.85rem;
+    color: #7f8c8d;
+    margin-bottom: 5px;
+}
+
+.stat-value {
+    display: block;
+    font-size: 1rem;
+    font-weight: 600;
+    color: #2c3e50;
+    font-family: 'Courier New', Courier, monospace;
 }

@@ -10,10 +10,8 @@ if (!isLoggedIn()) {
 
 $username = getCurrentUser();
 $loginTime = isset($_SESSION['login_time']) ? $_SESSION['login_time'] : time();
-$sessionDuration = time() - $loginTime;
-$hours = floor($sessionDuration / 3600);
-$minutes = floor(($sessionDuration % 3600) / 60);
-$seconds = $sessionDuration % 60;
+$currentTime = time();
+$sessionDuration = $currentTime - $loginTime;
 ?>
 <!DOCTYPE html>
 <html lang="ru">
@@ -55,13 +53,13 @@ $seconds = $sessionDuration % 60;
                         <div class="info-box">
                             <i class="fas fa-clock"></i>
                             <h3>Время входа</h3>
-                            <p><?php echo date('H:i:s d.m.Y', $loginTime); ?></p>
+                            <p id="login-time"><?php echo date('H:i:s d.m.Y', $loginTime); ?></p>
                         </div>
 
                         <div class="info-box">
                             <i class="fas fa-history"></i>
                             <h3>Длительность сессии</h3>
-                            <p><?php printf("%02d:%02d:%02d", $hours, $minutes, $seconds); ?></p>
+                            <p id="session-duration"><?php echo formatDuration($sessionDuration); ?></p>
                         </div>
 
                         <div class="info-box">
@@ -84,6 +82,20 @@ $seconds = $sessionDuration % 60;
                             <li><strong>Сессии PHP</strong> - для отслеживания состояния входа</li>
                             <li><strong>Защита от XSS</strong> - через htmlspecialchars()</li>
                         </ul>
+
+                        <div class="session-info">
+                            <h4><i class="fas fa-clock"></i> Информация о сессии:</h4>
+                            <div class="session-stats">
+                                <div class="stat-item">
+                                    <span class="stat-label">ID сессии:</span>
+                                    <span class="stat-value"><?php echo substr(session_id(), 0, 10) . '...'; ?></span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-label">Время до таймаута:</span>
+                                    <span id="timeout-timer" class="stat-value">15:00</span>
+                                </div>
+                            </div>
+                        </div>
                     </div>
 
                     <div class="dashboard-card">
@@ -95,8 +107,11 @@ $seconds = $sessionDuration % 60;
                             <a href="logout.php" class="btn btn-primary"><i class="fas fa-sign-out-alt"></i> Выйти из
                                 системы</a>
                         </div>
-                        <p class="note"><i class="fas fa-exclamation-triangle"></i> Функции смены пароля и настроек
-                            находятся в разработке.</p>
+                        <div class="note">
+                            <i class="fas fa-exclamation-triangle"></i>
+                            <p>Сессия автоматически завершится через 15 минут неактивности. Для продления сессии просто
+                                обновите страницу или выполните любое действие.</p>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -107,6 +122,136 @@ $seconds = $sessionDuration % 60;
             <p class="footer-info">Демонстрация работы с password_hash() и password_verify()</p>
         </footer>
     </div>
+
+    <script>
+        // Функция для форматирования времени
+        function formatDuration(seconds) {
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            const secs = seconds % 60;
+
+            if (hours > 0) {
+                return hours.toString().padStart(2, '0') + ':' +
+                    minutes.toString().padStart(2, '0') + ':' +
+                    secs.toString().padStart(2, '0');
+            } else {
+                return minutes.toString().padStart(2, '0') + ':' +
+                    secs.toString().padStart(2, '0');
+            }
+        }
+
+        // Основной таймер для обновления длительности сессии
+        let sessionStartTime = <?php echo $loginTime; ?>; // Время входа в секундах
+        let sessionDurationElement = document.getElementById('session-duration');
+        let timeoutTimerElement = document.getElementById('timeout-timer');
+
+        function updateSessionTimer() {
+            // Текущее время в секундах
+            const now = Math.floor(Date.now() / 1000);
+
+            // Обновляем длительность сессии
+            const duration = now - sessionStartTime;
+            sessionDurationElement.textContent = formatDuration(duration);
+
+            // Обновляем таймер до таймаута (15 минут = 900 секунд)
+            const timeoutSeconds = 900 - (duration % 900); // Остаток до следующего таймаута
+            const timeoutMinutes = Math.floor(timeoutSeconds / 60);
+            const timeoutSecs = timeoutSeconds % 60;
+            timeoutTimerElement.textContent =
+                timeoutMinutes.toString().padStart(2, '0') + ':' +
+                timeoutSecs.toString().padStart(2, '0');
+
+            // Меняем цвет, если осталось мало времени
+            if (timeoutSeconds < 300) { // Меньше 5 минут
+                timeoutTimerElement.style.color = '#e74c3c';
+                timeoutTimerElement.style.fontWeight = 'bold';
+            } else if (timeoutSeconds < 600) { // Меньше 10 минут
+                timeoutTimerElement.style.color = '#f39c12';
+            } else {
+                timeoutTimerElement.style.color = '#27ae60';
+            }
+        }
+
+        // Обновляем каждую секунду
+        setInterval(updateSessionTimer, 1000);
+
+        // Запускаем сразу
+        updateSessionTimer();
+
+        // Обновляем время последней активности при любом действии пользователя
+        document.addEventListener('click', function () {
+            updateLastActivity();
+        });
+
+        document.addEventListener('keypress', function () {
+            updateLastActivity();
+        });
+
+        document.addEventListener('scroll', function () {
+            updateLastActivity();
+        });
+
+        // Функция для обновления времени активности (опционально, можно отправлять на сервер)
+        function updateLastActivity() {
+            // Здесь можно отправить AJAX запрос на сервер для обновления времени активности
+            // fetch('update_activity.php');
+
+            // Локально просто пересчитываем таймер
+            updateSessionTimer();
+        }
+
+        // Автоматическое обновление таймера при смене вкладки
+        document.addEventListener('visibilitychange', function () {
+            if (!document.hidden) {
+                updateSessionTimer();
+            }
+        });
+
+        // Показываем уведомление при приближении таймаута
+        let notificationShown = false;
+
+        function checkTimeoutNotification() {
+            const now = Math.floor(Date.now() / 1000);
+            const duration = now - sessionStartTime;
+            const remaining = 900 - (duration % 900);
+
+            if (remaining <= 300 && !notificationShown) { // 5 минут
+                showTimeoutNotification(remaining);
+                notificationShown = true;
+            } else if (remaining > 300) {
+                notificationShown = false;
+            }
+        }
+
+        function showTimeoutNotification(seconds) {
+            const minutes = Math.ceil(seconds / 60);
+
+            // Создаем уведомление
+            const notification = document.createElement('div');
+            notification.className = 'timeout-notification';
+            notification.innerHTML = `
+            <i class="fas fa-clock"></i>
+            <div>
+                <strong>Внимание!</strong>
+                <p>Сессия завершится через ${minutes} минут.</p>
+                <button onclick="this.parentElement.parentElement.remove()">OK</button>
+            </div>
+        `;
+
+            document.body.appendChild(notification);
+
+            // Автоматически скрываем через 10 секунд
+            setTimeout(() => {
+                if (notification.parentNode) {
+                    notification.remove();
+                }
+            }, 10000);
+        }
+
+        // Проверяем уведомления каждые 30 секунд
+        setInterval(checkTimeoutNotification, 30000);
+        checkTimeoutNotification();
+    </script>
 </body>
 
 </html>
