@@ -1,10 +1,15 @@
 <?php
-// verify_2fa.php - Универсальная версия (заменяет старую)
+// verify_2fa.php - Упрощенная версия
 require_once 'config.php';
 
-// Ожидаем, что loginUser() при обнаружении включённой 2FA
-// ставит сессию: $_SESSION['twofa_pending_user'] и $_SESSION['twofa_pending_time']
+// Проверяем, нужно ли подтверждение 2FA
 if (empty($_SESSION['twofa_pending_user'])) {
+    // Если пользователь уже вошел, перенаправляем в кабинет
+    if (isLoggedIn()) {
+        header('Location: dashboard.php');
+        exit;
+    }
+    // Иначе - на страницу входа
     header('Location: login.php');
     exit;
 }
@@ -13,129 +18,57 @@ $username = $_SESSION['twofa_pending_user'];
 $message = '';
 $messageType = '';
 
-// Подключаем те же вспомогательные функции, если их нет
-// (base32_decode, generateTOTPCode, verifyTOTP) — они уже описаны в setup_2fa.php и/или config.php
-if (!function_exists('base32_decode')) {
-    // Копируем реализацию (как в setup_2fa)
-    function base32_decode($b32)
-    {
-        $alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
-        $b32 = strtoupper($b32);
-        $plain = '';
-        $bits = 0;
-        $buffer = 0;
-        for ($i = 0, $len = strlen($b32); $i < $len; $i++) {
-            $val = strpos($alphabet, $b32[$i]);
-            if ($val === false)
-                continue;
-            $buffer = ($buffer << 5) | $val;
-            $bits += 5;
-            if ($bits >= 8) {
-                $bits -= 8;
-                $plain .= chr(($buffer >> $bits) & 0xFF);
-            }
-        }
-        return $plain;
-    }
-}
-if (!function_exists('generateTOTPCode')) {
-    function generateTOTPCode($secret, $timestamp)
-    {
-        $key = base32_decode($secret);
-        $time = pack('N*', 0) . pack('N*', $timestamp);
-        $hash = hash_hmac('sha1', $time, $key, true);
-        $offset = ord($hash[19]) & 0xf;
-        $binary =
-            ((ord($hash[$offset]) & 0x7f) << 24) |
-            ((ord($hash[$offset + 1]) & 0xff) << 16) |
-            ((ord($hash[$offset + 2]) & 0xff) << 8) |
-            (ord($hash[$offset + 3]) & 0xff);
-        $otp = $binary % 1000000;
-        return str_pad($otp, 6, '0', STR_PAD_LEFT);
-    }
-}
-if (!function_exists('verifyTOTP')) {
-    function verifyTOTP($secret, $code, $window = 1)
-    {
-        $time = floor(time() / 30);
-        for ($i = -$window; $i <= $window; $i++) {
-            if (generateTOTPCode($secret, $time + $i) === (string) $code)
-                return true;
-        }
-        return false;
-    }
+// Проверка таймаута (5 минут)
+if (
+    isset($_SESSION['twofa_pending_time']) &&
+    (time() - $_SESSION['twofa_pending_time']) > 300
+) {
+    unset($_SESSION['twofa_pending_user'], $_SESSION['twofa_pending_time']);
+    $message = 'Время для ввода кода истекло. Пожалуйста, войдите снова.';
+    $messageType = 'error';
+    logSecurityEvent('2FA_TIMEOUT', $username);
 }
 
-// Функция для получения сохранённого секрета пользователя
-if (!function_exists('getUser2FASecret')) {
-    function getUser2FASecret($username)
-    {
-        if (!file_exists(USERS_FILE))
-            return null;
-        $lines = file(USERS_FILE, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-        foreach ($lines as $line) {
-            $parts = explode(':', $line);
-            if (($parts[0] ?? '') === $username) {
-                return $parts[4] ?? null;
-            }
-        }
-        return null;
-    }
-}
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    // CSRF
-    if (function_exists('validateCSRFToken')) {
-        $csrf = $_POST['csrf_token'] ?? '';
-        if (!validateCSRFToken($csrf)) {
-            $message = 'Ошибка безопасности (CSRF).';
-            $messageType = 'error';
-        }
-    }
-
-    if (empty($message)) {
+// Обработка POST запроса
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && empty($message)) {
+    $csrf = $_POST['csrf_token'] ?? '';
+    if (!validateCSRFToken($csrf)) {
+        $message = 'Ошибка безопасности (CSRF).';
+        $messageType = 'error';
+    } else {
         $code = trim($_POST['code'] ?? '');
         if (empty($code) || !preg_match('/^\d{6}$/', $code)) {
-            $message = 'Введите корректный 6-значный код.';
+            $message = 'Введите корректный 6-значный код из приложения.';
             $messageType = 'error';
         } else {
-            $secret = getUser2FASecret($username);
-            if (empty($secret)) {
-                $message = 'Секрет 2FA не найден. Обратитесь к администратору.';
-                $messageType = 'error';
-            } else {
-                if (verifyTOTP($secret, $code)) {
-                    // Успех: логиним пользователя окончательно
-                    $_SESSION['user'] = $username;
-                    $_SESSION['login_time'] = time();
-                    $_SESSION['last_activity'] = time();
-                    // Удаляем pending
-                    unset($_SESSION['twofa_pending_user'], $_SESSION['twofa_pending_time']);
-                    if (function_exists('logSecurityEvent')) {
-                        logSecurityEvent('2FA_SUCCESS', $username);
-                    }
-                    header('Location: dashboard.php');
-                    exit;
-                } else {
-                    $message = 'Неверный код. Попробуйте снова.';
-                    $messageType = 'error';
-                    if (function_exists('logSecurityEvent')) {
-                        logSecurityEvent('2FA_FAILURE', $username);
-                    }
+            if (verify2FALogin($username, $code)) {
+                // Успешная верификация
+                $_SESSION['user'] = $username;
+                $_SESSION['login_time'] = time();
+                $_SESSION['last_activity'] = time();
+
+                // Восстанавливаем email из сессии, если есть
+                if (isset($_SESSION['pending_email'])) {
+                    $_SESSION['email'] = $_SESSION['pending_email'];
+                    unset($_SESSION['pending_email']);
                 }
+
+                // Очищаем pending данные
+                unset($_SESSION['twofa_pending_user'], $_SESSION['twofa_pending_time']);
+
+                logSecurityEvent('2FA_SUCCESS', $username);
+
+                // Перенаправляем в кабинет
+                header('Location: dashboard.php');
+                exit;
+            } else {
+                $message = '❌ Неверный код. Попробуйте снова.';
+                $messageType = 'error';
+                logSecurityEvent('2FA_FAILURE', $username);
             }
         }
     }
 }
-
-// Если прошло слишком много времени (например >5 минут) — отказываем
-if (isset($_SESSION['twofa_pending_time']) && (time() - $_SESSION['twofa_pending_time'] > 300)) {
-    unset($_SESSION['twofa_pending_user'], $_SESSION['twofa_pending_time']);
-    header('Location: login.php');
-    exit;
-}
-
-// --- HTML ---
 ?>
 <!DOCTYPE html>
 <html lang="ru">
@@ -143,72 +76,197 @@ if (isset($_SESSION['twofa_pending_time']) && (time() - $_SESSION['twofa_pending
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>Подтверждение 2FA</title>
-    <link rel="stylesheet" href="style.css">
+    <title>Подтверждение двухфакторной аутентификации</title>
     <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
         .container {
-            max-width: 700px;
-            margin: 20px auto;
-            padding: 15px
+            background: white;
+            padding: 40px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+            max-width: 500px;
+            width: 100%;
+            text-align: center;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .user-info {
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 8px;
+            margin: 20px 0;
+            font-size: 18px;
         }
 
         .message {
-            padding: 10px;
-            margin: 10px 0;
-            border-radius: 6px
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 8px;
+            border-left: 4px solid;
         }
 
         .message.error {
-            background: #fff3f3;
-            border-left: 4px solid #d64545
+            background: #ffe6e6;
+            border-color: #ff3333;
+            color: #cc0000;
         }
 
-        .input-code {
+        .message.success {
+            background: #e6ffe6;
+            border-color: #33cc33;
+            color: #006600;
+        }
+
+        .code-input {
             font-family: monospace;
-            font-size: 1.4rem;
-            padding: 8px;
-            width: 160px;
-            text-align: center
+            font-size: 32px;
+            letter-spacing: 10px;
+            padding: 15px;
+            width: 220px;
+            text-align: center;
+            border: 2px solid #667eea;
+            border-radius: 10px;
+            margin: 20px auto;
+            display: block;
+            outline: none;
+            transition: all 0.3s;
+        }
+
+        .code-input:focus {
+            border-color: #764ba2;
+            box-shadow: 0 0 10px rgba(102, 126, 234, 0.5);
         }
 
         .btn {
-            padding: 8px 12px;
-            border-radius: 6px
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            border-radius: 8px;
+            font-size: 18px;
+            cursor: pointer;
+            margin: 10px;
+            transition: transform 0.3s, box-shadow 0.3s;
         }
 
-        .btn.primary {
-            background: #1976d2;
-            color: #fff;
-            border: 0
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+        }
+
+        .instructions {
+            background: #f0f8ff;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+            text-align: left;
+        }
+
+        .instructions h3 {
+            margin-top: 0;
+            color: #667eea;
+        }
+
+        .timer {
+            color: #666;
+            font-size: 14px;
+            margin: 10px 0;
+        }
+
+        .backup-link {
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+        }
+
+        .backup-link a {
+            color: #667eea;
+            text-decoration: none;
+        }
+
+        .backup-link a:hover {
+            text-decoration: underline;
         }
     </style>
 </head>
 
 <body>
     <div class="container">
-        <h1>Подтверждение 2FA</h1>
-        <p>Вход для: <strong><?php echo escape($username); ?></strong></p>
+        <h1>🔐 Подтверждение входа</h1>
+        <p>Требуется двухфакторная аутентификация</p>
 
-        <?php if ($message): ?>
-            <div class="message <?php echo escape($messageType); ?>"><?php echo escape($message); ?></div>
+        <div class="user-info">
+            Пользователь: <strong><?php echo escape($username); ?></strong>
+        </div>
+
+        <?php if (!empty($message)): ?>
+            <div class="message <?php echo escape($messageType); ?>">
+                <?php echo escape($message); ?>
+            </div>
         <?php endif; ?>
 
-        <form method="post" action="">
-            <?php if (function_exists('generateCSRFToken')): ?>
-                <input type="hidden" name="csrf_token" value="<?php echo escape(generateCSRFToken()); ?>">
-            <?php endif; ?>
-            <div style="margin:10px 0">
-                <input type="text" name="code" required pattern="\d{6}" maxlength="6" placeholder="123456"
-                    class="input-code" autofocus>
+        <form method="post" action="" id="verifyForm">
+            <input type="hidden" name="csrf_token" value="<?php echo escape(generateCSRFToken()); ?>">
+
+            <div class="instructions">
+                <h3>📱 Как получить код:</h3>
+                <ol>
+                    <li>Откройте приложение Google Authenticator</li>
+                    <li>Найдите запись для этого сайта</li>
+                    <li>Введите 6-значный код ниже</li>
+                </ol>
             </div>
-            <div>
-                <button type="submit" class="btn primary">Подтвердить и войти</button>
-                <a href="login.php" style="margin-left:10px">Отменить</a>
+
+            <input type="text" name="code" id="code" required pattern="\d{6}" maxlength="6" placeholder="123456"
+                class="code-input" autofocus>
+
+            <div class="timer">
+                ⏰ Код обновляется каждые 30 секунд
             </div>
+
+            <button type="submit" class="btn">✅ Подтвердить и войти</button>
+            <a href="login.php" class="btn btn-secondary">Отмена</a>
         </form>
 
-        <p style="margin-top:20px;color:#666">Если код не приходит — проверьте синхронизацию времени на устройстве.</p>
+        <div class="backup-link">
+            <p>Нет доступа к приложению? <a href="recover_account.php">Использовать резервный код</a></p>
+        </div>
     </div>
+
+    <script>
+        // Автоматический переход между цифрами
+        document.getElementById('code').addEventListener('input', function (e) {
+            if (this.value.length === 6) {
+                document.getElementById('verifyForm').submit();
+            }
+        });
+
+        // Автофокус и очистка при ошибке
+        document.getElementById('code').focus();
+        <?php if (!empty($message) && $messageType === 'error'): ?>
+            setTimeout(function () {
+                document.getElementById('code').value = '';
+                document.getElementById('code').focus();
+            }, 100);
+        <?php endif; ?>
+    </script>
 </body>
 
 </html>

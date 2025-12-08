@@ -22,6 +22,45 @@ $sessionDuration = $currentTime - $loginTime;
     <title>Личный кабинет - Система авторизации</title>
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .timeout-notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+            color: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            z-index: 1000;
+            animation: slideIn 0.3s ease;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        .timeout-notification button {
+            background: white;
+            color: #3498db;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-left: 10px;
+        }
+    </style>
 </head>
 
 <body>
@@ -81,6 +120,8 @@ $sessionDuration = $currentTime - $loginTime;
                             <li><strong>password_verify()</strong> - для проверки паролей</li>
                             <li><strong>Сессии PHP</strong> - для отслеживания состояния входа</li>
                             <li><strong>Защита от XSS</strong> - через htmlspecialchars()</li>
+                            <li><strong>Двухфакторная аутентификация (2FA)</strong> - дополнительный уровень
+                                безопасности</li>
                         </ul>
 
                         <div class="session-info">
@@ -101,9 +142,12 @@ $sessionDuration = $currentTime - $loginTime;
                     <div class="dashboard-card">
                         <h3><i class="fas fa-cogs"></i> Управление аккаунтом</h3>
                         <div class="actions">
-                            <a href="#" class="btn btn-secondary"><i class="fas fa-key"></i> Сменить пароль</a>
-                            <a href="#" class="btn btn-secondary"><i class="fas fa-envelope"></i> Настройки
-                                уведомлений</a>
+                            <a href="change_password.php" class="btn btn-secondary"><i class="fas fa-key"></i> Сменить
+                                пароль</a>
+                            <a href="notification_settings.php" class="btn btn-secondary"><i
+                                    class="fas fa-envelope"></i> Настройки уведомлений</a>
+                            <a href="setup_2fa.php" class="btn btn-secondary"><i class="fas fa-shield-alt"></i>
+                                Настройка 2FA</a>
                             <a href="logout.php" class="btn btn-primary"><i class="fas fa-sign-out-alt"></i> Выйти из
                                 системы</a>
                         </div>

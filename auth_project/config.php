@@ -1,12 +1,14 @@
 <?php
-// config.php - Полностью рабочая версия без синтаксических ошибок
-session_start();
+// Начинаем сессию только если она еще не запущена
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
 
 // Настройки для файлового хранения
 define('USERS_FILE', 'users.txt');
 define('RESET_TOKENS_FILE', 'reset_tokens.txt');
 define('LOGIN_ATTEMPTS_FILE', 'login_attempts.txt');
-define('TWO_FA_SECRETS_FILE', 'twofa_secrets.txt');
+define('SECURITY_LOG', 'security.log');
 
 // ============================================
 // 1. Функции для работы с пользователями
@@ -14,32 +16,35 @@ define('TWO_FA_SECRETS_FILE', 'twofa_secrets.txt');
 
 function registerUser($username, $email, $password)
 {
-    // Проверяем, существует ли пользователь
+    $username = trim($username);
+    $email = trim($email);
+
     if (userExists($username)) {
         return ['success' => false, 'message' => 'Пользователь с таким именем уже существует'];
     }
 
-    // Проверяем, существует ли email
     if (emailExists($email)) {
         return ['success' => false, 'message' => 'Пользователь с таким email уже существует'];
     }
 
-    // Проверка сложности пароля
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        return ['success' => false, 'message' => 'Некорректный email адрес'];
+    }
+
     $passwordErrors = validatePasswordStrength($password);
     if (!empty($passwordErrors)) {
         return ['success' => false, 'message' => implode('. ', $passwordErrors)];
     }
 
-    // Хешируем пароль
     $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
-
-    // Сохраняем пользователя в формате: username:email:hash:2fa_enabled:2fa_secret
     $userData = $username . ':' . $email . ':' . $hashedPassword . ':0:' . PHP_EOL;
 
     $result = file_put_contents(USERS_FILE, $userData, FILE_APPEND | LOCK_EX);
     if ($result !== false) {
+        logSecurityEvent('REGISTRATION_SUCCESS', $username, $email);
         return ['success' => true, 'message' => 'Регистрация успешна! Теперь вы можете войти.'];
     } else {
+        logSecurityEvent('REGISTRATION_FAILED', $username, 'File write error');
         return ['success' => false, 'message' => 'Ошибка при сохранении данных'];
     }
 }
@@ -54,7 +59,7 @@ function userExists($username)
 
     foreach ($users as $user) {
         $data = explode(':', $user);
-        if (isset($data[0]) && $data[0] === $username) {
+        if (isset($data[0]) && trim($data[0]) === trim($username)) {
             return true;
         }
     }
@@ -72,7 +77,7 @@ function emailExists($email)
 
     foreach ($users as $user) {
         $data = explode(':', $user);
-        if (isset($data[1]) && $data[1] === $email) {
+        if (isset($data[1]) && trim($data[1]) === trim($email)) {
             return true;
         }
     }
@@ -82,51 +87,96 @@ function emailExists($email)
 
 function loginUser($login, $password)
 {
+    $login = trim($login);
+    $ip = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
+
+    if (isLoginBlocked($ip)) {
+        return ['success' => false, 'message' => 'Слишком много неудачных попыток входа. Попробуйте позже.'];
+    }
+
     if (!file_exists(USERS_FILE)) {
+        recordLoginAttempt($ip);
         return ['success' => false, 'message' => 'Пользователь не найден'];
     }
 
     $users = file(USERS_FILE, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    $found = false;
+    $username = null;
 
     foreach ($users as $user) {
         $data = explode(':', $user);
+        while (count($data) < 5) {
+            $data[] = '';
+        }
 
-        $username = $data[0] ?? null;
-        $email = $data[1] ?? null;
-        $hash = $data[2] ?? null;
+        $storedUsername = trim($data[0]);
+        $storedEmail = trim($data[1]);
+        $hash = $data[2];
+        $is2FAEnabled = $data[3];
+        $twoFASecret = trim($data[4]);
 
-        // Проверяем логин: введённый login может быть username ИЛИ email
-        if ($login === $username || $login === $email) {
+        if ($login === $storedUsername || $login === $storedEmail) {
+            $found = true;
+            $username = $storedUsername;
 
-            // Проверка пароля
             if (password_verify($password, $hash)) {
+                clearLoginAttempts($ip);
 
-                $_SESSION['user'] = $username;
-                $_SESSION['email'] = $email;
-                $_SESSION['login_time'] = time();
-                $_SESSION['last_activity'] = time();
+                // ✅ ИСПРАВЛЕНИЕ: Правильная проверка 2FA
+                if ($is2FAEnabled === '1' && !empty($twoFASecret)) {
+                    $_SESSION['twofa_pending_user'] = $username;
+                    $_SESSION['twofa_pending_time'] = time();
+                    $_SESSION['pending_email'] = $storedEmail;
+                    $_SESSION['requires_2fa'] = true; // ✅ Устанавливаем флаг 2FA
 
-                // Проверяем, требуется ли 2FA
-                if (isset($data[3]) && $data[3] == 1) {
-                    $_SESSION['requires_2fa'] = true;
-                    return ['success' => true, 'requires_2fa' => true];
+                    logSecurityEvent('LOGIN_2FA_REQUIRED', $username);
+                    return [
+                        'success' => true,
+                        'requires_2fa' => true,
+                        'username' => $username,
+                        'user_id' => $username // ✅ Добавляем user_id для совместимости
+                    ];
                 }
 
-                return ['success' => true, 'requires_2fa' => false];
-            }
+                // Если 2FA не включена
+                $_SESSION['user'] = $username;
+                $_SESSION['email'] = $storedEmail;
+                $_SESSION['login_time'] = time();
+                $_SESSION['last_activity'] = time();
+                unset($_SESSION['requires_2fa'], $_SESSION['twofa_pending_user']); // ✅ Очищаем 2FA флаги
 
-            // Если пароль неверный
-            return ['success' => false, 'message' => 'Неверный пароль'];
+                logSecurityEvent('LOGIN_SUCCESS', $username);
+                return [
+                    'success' => true,
+                    'requires_2fa' => false,
+                    'user_id' => $username // ✅ Добавляем user_id для совместимости
+                ];
+            }
+            break;
         }
     }
 
-    return ['success' => false, 'message' => 'Пользователь не найден'];
+    recordLoginAttempt($ip);
+
+    if ($found) {
+        logSecurityEvent('LOGIN_FAILED_WRONG_PASSWORD', $login);
+        return ['success' => false, 'message' => 'Неверный пароль'];
+    } else {
+        logSecurityEvent('LOGIN_FAILED_USER_NOT_FOUND', $login);
+        return ['success' => false, 'message' => 'Пользователь не найден'];
+    }
 }
 
-
+// ✅ ИСПРАВЛЕНИЕ: Правильная функция isLoggedIn()
 function isLoggedIn()
 {
-    return isset($_SESSION['user']) && !isset($_SESSION['requires_2fa']);
+    // Пользователь залогинен если:
+    // 1. Есть user в сессии
+    // 2. НЕТ requires_2fa (или false)
+    // 3. НЕТ twofa_pending_user
+    return isset($_SESSION['user']) &&
+        !isset($_SESSION['requires_2fa']) &&
+        !isset($_SESSION['twofa_pending_user']);
 }
 
 function requires2FA()
@@ -146,14 +196,13 @@ function getCurrentEmail()
 
 function logout()
 {
-    // Логируем выход
     if (isset($_SESSION['user'])) {
         logSecurityEvent('LOGOUT', $_SESSION['user']);
     }
 
     session_unset();
     session_destroy();
-    session_start(); // Начинаем новую сессию
+    session_start();
 }
 
 // ============================================
@@ -162,35 +211,37 @@ function logout()
 
 function initiatePasswordReset($email)
 {
-    // Проверяем, существует ли пользователь с таким email
+    $email = trim($email);
     $username = getUsernameByEmail($email);
+
     if (!$username) {
-        // Для безопасности не сообщаем, что email не существует
+        logSecurityEvent('PASSWORD_RESET_REQUEST', null, "Email not found: $email");
         return ['success' => true, 'message' => 'Если email существует, инструкции отправлены.'];
     }
 
-    // Генерируем токен
     $token = bin2hex(random_bytes(32));
-    $expires = time() + 3600; // Токен действителен 1 час
-
-    // Сохраняем токен
+    $expires = time() + 3600;
     $resetData = $email . ':' . $token . ':' . $expires . PHP_EOL;
+
     if (file_put_contents(RESET_TOKENS_FILE, $resetData, FILE_APPEND | LOCK_EX) === false) {
+        logSecurityEvent('PASSWORD_RESET_FAILED', $username, 'Token creation failed');
         return ['success' => false, 'message' => 'Ошибка при создании токена сброса'];
     }
 
-    // Для демо показываем ссылку
-    $resetLink = "http://" . $_SERVER['HTTP_HOST'] . "/reset_password.php?token=$token";
+    $resetLink = "http://" . $_SERVER['HTTP_HOST'] . dirname($_SERVER['PHP_SELF']) . "/reset_password.php?token=$token";
+    logSecurityEvent('PASSWORD_RESET_REQUEST', $username);
 
     return [
         'success' => true,
         'message' => 'Инструкции по сбросу пароля отправлены на email.',
-        'demo_link' => $resetLink // Только для демо
+        'demo_link' => $resetLink
     ];
 }
 
 function getUsernameByEmail($email)
 {
+    $email = trim($email);
+
     if (!file_exists(USERS_FILE)) {
         return null;
     }
@@ -199,8 +250,8 @@ function getUsernameByEmail($email)
 
     foreach ($users as $user) {
         $data = explode(':', $user);
-        if (isset($data[1]) && $data[1] === $email) {
-            return $data[0] ?? null;
+        if (isset($data[1]) && trim($data[1]) === $email) {
+            return isset($data[0]) ? trim($data[0]) : null;
         }
     }
 
@@ -220,8 +271,8 @@ function validateResetToken($token)
         if (count($parts) >= 3) {
             list($email, $storedToken, $expires) = $parts;
 
-            if ($storedToken === $token && $expires > time()) {
-                return $email;
+            if (trim($storedToken) === trim($token) && $expires > time()) {
+                return trim($email);
             }
         }
     }
@@ -236,28 +287,35 @@ function resetPassword($token, $newPassword)
         return ['success' => false, 'message' => 'Неверный или просроченный токен'];
     }
 
-    // Обновляем пароль пользователя
+    $passwordErrors = validatePasswordStrength($newPassword);
+    if (!empty($passwordErrors)) {
+        return ['success' => false, 'message' => implode('. ', $passwordErrors)];
+    }
+
     $users = file(USERS_FILE, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
     $updatedUsers = [];
     $found = false;
+    $username = null;
 
     foreach ($users as $user) {
         $data = explode(':', $user);
-        if (isset($data[1]) && $data[1] === $email) {
+        if (isset($data[1]) && trim($data[1]) === $email) {
             $data[2] = password_hash($newPassword, PASSWORD_DEFAULT);
             $found = true;
+            $username = isset($data[0]) ? trim($data[0]) : null;
         }
         $updatedUsers[] = implode(':', $data);
     }
 
     if ($found) {
         if (file_put_contents(USERS_FILE, implode(PHP_EOL, $updatedUsers) . PHP_EOL, LOCK_EX) !== false) {
-            // Удаляем использованный токен
             removeResetToken($token);
+            logSecurityEvent('PASSWORD_RESET_SUCCESS', $username);
             return ['success' => true, 'message' => 'Пароль успешно изменен'];
         }
     }
 
+    logSecurityEvent('PASSWORD_RESET_FAILED', $username, 'Password update failed');
     return ['success' => false, 'message' => 'Ошибка при изменении пароля'];
 }
 
@@ -272,7 +330,7 @@ function removeResetToken($token)
 
     foreach ($tokens as $line) {
         $parts = explode(':', $line);
-        if (count($parts) >= 2 && $parts[1] !== $token) {
+        if (count($parts) >= 2 && trim($parts[1]) !== trim($token)) {
             $updatedTokens[] = $line;
         }
     }
@@ -298,19 +356,15 @@ function recordLoginAttempt($ip)
 
     $currentTime = time();
 
-    // Очищаем старые попытки (старше 15 минут)
     if (isset($attemptsData[$ip])) {
         $attemptsData[$ip] = array_filter($attemptsData[$ip], function ($attempt) use ($currentTime) {
-            return ($currentTime - $attempt) < 900; // 15 минут
+            return ($currentTime - $attempt) < 900;
         });
     } else {
         $attemptsData[$ip] = [];
     }
 
-    // Добавляем новую попытку
     $attemptsData[$ip][] = $currentTime;
-
-    // Сохраняем попытки
     file_put_contents(LOGIN_ATTEMPTS_FILE, json_encode($attemptsData), LOCK_EX);
 
     return count($attemptsData[$ip]);
@@ -336,12 +390,10 @@ function isLoginBlocked($ip)
     $attempts = getLoginAttempts($ip);
     $currentTime = time();
 
-    // Очищаем старые попытки
     $recentAttempts = array_filter($attempts, function ($attempt) use ($currentTime) {
-        return ($currentTime - $attempt) < 900; // 15 минут
+        return ($currentTime - $attempt) < 900;
     });
 
-    // Если больше 5 попыток за 15 минут - блокируем
     return count($recentAttempts) >= 5;
 }
 
@@ -364,117 +416,288 @@ function clearLoginAttempts($ip)
 }
 
 // ============================================
-// 4. Функции 2FA
+// 4. ФУНКЦИИ 2FA (ДОБАВЛЕНА НУЖНАЯ ФУНКЦИЯ)
 // ============================================
 
-function setupSimple2FA($username)
+function is2FAEnabled($username)
 {
-    // Генерируем секретный ключ
-    $secret = bin2hex(random_bytes(10));
+    $username = trim($username);
 
-    // Сохраняем секрет
-    $twofaData = $username . ':' . $secret . ':0' . PHP_EOL;
-
-    if (file_put_contents(TWO_FA_SECRETS_FILE, $twofaData, FILE_APPEND | LOCK_EX) !== false) {
-        // Генерируем QR-код URL
-        $qrCodeUri = "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=" .
-            urlencode("otpauth://totp/AuthSystem:" . $username . "?secret=" . $secret . "&issuer=AuthSystem");
-
-        return [
-            'success' => true,
-            'secret' => $secret,
-            'qr_code' => $qrCodeUri
-        ];
-    }
-
-    return ['success' => false, 'message' => 'Ошибка настройки 2FA'];
-}
-
-function verifySimple2FASetup($username, $code)
-{
-    if (!file_exists(TWO_FA_SECRETS_FILE)) {
+    if (!file_exists(USERS_FILE)) {
         return false;
     }
 
-    $secrets = file(TWO_FA_SECRETS_FILE, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    $users = file(USERS_FILE, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
 
-    foreach ($secrets as $line) {
-        $data = explode(':', $line);
-        if (isset($data[0]) && $data[0] === $username) {
-            // Упрощенная проверка: сравниваем код с секретом
-            // В реальном проекте используйте TOTP алгоритм
-            $secret = $data[1] ?? '';
+    foreach ($users as $user) {
+        $data = explode(':', $user);
+        while (count($data) < 5) {
+            $data[] = '';
+        }
 
-            // Для демо просто проверяем, что код не пустой
-            if (!empty($code) && strlen($code) === 6) {
-                updateSimple2FAStatus($username, $secret, 1);
-                enable2FAForUser($username);
-                return true;
-            }
+        if (
+            trim($data[0]) === $username &&
+            $data[3] === '1' &&
+            !empty(trim($data[4]))
+        ) {
+            return true;
         }
     }
 
     return false;
 }
 
-function updateSimple2FAStatus($username, $secret, $verified)
+// ✅ ДОБАВЛЕНА НОВАЯ ФУНКЦИЯ: Проверка 2FA по username
+function is2FAEnabledById($username)
 {
-    if (!file_exists(TWO_FA_SECRETS_FILE)) {
-        return;
+    return is2FAEnabled($username);
+}
+
+function getUser2FASecret($username)
+{
+    $username = trim($username);
+
+    if (!file_exists(USERS_FILE)) {
+        return null;
     }
 
-    $secrets = file(TWO_FA_SECRETS_FILE, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-    $updatedSecrets = [];
+    $users = file(USERS_FILE, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
 
-    foreach ($secrets as $line) {
-        $data = explode(':', $line);
-        if (isset($data[0]) && $data[0] === $username) {
-            $updatedSecrets[] = $username . ':' . $secret . ':' . $verified;
-        } else {
-            $updatedSecrets[] = $line;
+    foreach ($users as $user) {
+        $data = explode(':', $user);
+        while (count($data) < 5) {
+            $data[] = '';
+        }
+
+        if (trim($data[0]) === $username) {
+            $secret = trim($data[4]);
+            return !empty($secret) ? $secret : null;
         }
     }
 
-    file_put_contents(TWO_FA_SECRETS_FILE, implode(PHP_EOL, $updatedSecrets) . PHP_EOL, LOCK_EX);
+    return null;
 }
 
-function enable2FAForUser($username)
+function generate2FASecret($length = 16)
 {
+    $chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+    $secret = '';
+
+    if (function_exists('random_int')) {
+        for ($i = 0; $i < $length; $i++) {
+            $secret .= $chars[random_int(0, 31)];
+        }
+    } else {
+        for ($i = 0; $i < $length; $i++) {
+            $secret .= $chars[mt_rand(0, 31)];
+        }
+    }
+
+    return $secret;
+}
+
+function generateQRCodeUrl($username, $secret, $issuer = 'AuthSystem')
+{
+    $otpauth = "otpauth://totp/" . rawurlencode($issuer) . ":" . rawurlencode($username) .
+        "?secret=" . $secret . "&issuer=" . rawurlencode($issuer);
+
+    return "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=" . urlencode($otpauth);
+}
+
+function base32_decode($b32)
+{
+    $alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+    $b32 = strtoupper($b32);
+    $plain = '';
+    $bits = 0;
+    $buffer = 0;
+
+    for ($i = 0, $len = strlen($b32); $i < $len; $i++) {
+        $val = strpos($alphabet, $b32[$i]);
+        if ($val === false)
+            continue;
+        $buffer = ($buffer << 5) | $val;
+        $bits += 5;
+        if ($bits >= 8) {
+            $bits -= 8;
+            $plain .= chr(($buffer >> $bits) & 0xFF);
+        }
+    }
+
+    return $plain;
+}
+
+function generateTOTPCode($secret, $timestamp)
+{
+    $key = base32_decode($secret);
+    $time = pack('N*', 0) . pack('N*', floor($timestamp / 30));
+    $hash = hash_hmac('sha1', $time, $key, true);
+    $offset = ord($hash[19]) & 0xF;
+    $binary = (
+        ((ord($hash[$offset]) & 0x7F) << 24) |
+        ((ord($hash[$offset + 1]) & 0xFF) << 16) |
+        ((ord($hash[$offset + 2]) & 0xFF) << 8) |
+        (ord($hash[$offset + 3]) & 0xFF)
+    );
+    return str_pad($binary % 1000000, 6, '0', STR_PAD_LEFT);
+}
+
+function verifyTOTP($secret, $code, $window = 1)
+{
+    $time = floor(time() / 30);
+    for ($i = -$window; $i <= $window; $i++) {
+        if (generateTOTPCode($secret, $time + $i) === (string) $code) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function setup2FA($username)
+{
+    $username = trim($username);
+
+    if (is2FAEnabled($username)) {
+        return ['success' => false, 'message' => '2FA уже включена для вашего аккаунта.'];
+    }
+
+    $secret = generate2FASecret();
+
+    $_SESSION['pending_2fa_secret'] = $secret;
+    $_SESSION['pending_2fa_user'] = $username;
+    $_SESSION['pending_2fa_time'] = time();
+
+    $qrCode = generateQRCodeUrl($username, $secret);
+
+    return [
+        'success' => true,
+        'secret' => $secret,
+        'qr_code' => $qrCode,
+        'message' => 'Секрет сгенерирован. Отсканируйте QR-код.'
+    ];
+}
+
+function confirm2FASetup($username, $code)
+{
+    $username = trim($username);
+
+    if (
+        !isset($_SESSION['pending_2fa_secret']) ||
+        !isset($_SESSION['pending_2fa_user']) ||
+        $_SESSION['pending_2fa_user'] !== $username
+    ) {
+        return false;
+    }
+
+    if (
+        isset($_SESSION['pending_2fa_time']) &&
+        (time() - $_SESSION['pending_2fa_time']) > 600
+    ) {
+        unset($_SESSION['pending_2fa_secret'], $_SESSION['pending_2fa_user'], $_SESSION['pending_2fa_time']);
+        return false;
+    }
+
+    $secret = $_SESSION['pending_2fa_secret'];
+
+    if (verifyTOTP($secret, $code)) {
+        if (save2FASecret($username, $secret)) {
+            unset($_SESSION['pending_2fa_secret'], $_SESSION['pending_2fa_user'], $_SESSION['pending_2fa_time']);
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function save2FASecret($username, $secret)
+{
+    $username = trim($username);
+
     if (!file_exists(USERS_FILE)) {
         return false;
     }
 
     $users = file(USERS_FILE, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
     $updatedUsers = [];
+    $found = false;
 
     foreach ($users as $user) {
         $data = explode(':', $user);
-        if (isset($data[0]) && $data[0] === $username) {
-            $data[3] = '1'; // Включаем 2FA
+        while (count($data) < 5) {
+            $data[] = '';
+        }
+
+        if (trim($data[0]) === $username) {
+            $data[3] = '1';
+            $data[4] = $secret;
+            $found = true;
         }
         $updatedUsers[] = implode(':', $data);
     }
 
-    $result = file_put_contents(USERS_FILE, implode(PHP_EOL, $updatedUsers) . PHP_EOL, LOCK_EX);
-    return $result !== false;
+    if ($found) {
+        $result = file_put_contents(USERS_FILE, implode(PHP_EOL, $updatedUsers) . PHP_EOL, LOCK_EX);
+        return $result !== false;
+    }
+
+    return false;
 }
 
-function is2FAEnabled($username)
+function verify2FALogin($username, $code)
 {
+    $username = trim($username);
+    $secret = getUser2FASecret($username);
+
+    if (empty($secret)) {
+        return false;
+    }
+
+    return verifyTOTP($secret, $code);
+}
+
+function disable2FA($username)
+{
+    $username = trim($username);
+
     if (!file_exists(USERS_FILE)) {
         return false;
     }
 
     $users = file(USERS_FILE, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    $updatedUsers = [];
+    $found = false;
 
     foreach ($users as $user) {
         $data = explode(':', $user);
-        if (isset($data[0]) && $data[0] === $username && isset($data[3]) && $data[3] == 1) {
-            return true;
+        while (count($data) < 5) {
+            $data[] = '';
         }
+
+        if (trim($data[0]) === $username) {
+            $data[3] = '0';
+            $data[4] = '';
+            $found = true;
+        }
+        $updatedUsers[] = implode(':', $data);
+    }
+
+    if ($found) {
+        $result = file_put_contents(USERS_FILE, implode(PHP_EOL, $updatedUsers) . PHP_EOL, LOCK_EX);
+        return $result !== false;
     }
 
     return false;
+}
+
+function generateBackupCodes($count = 8)
+{
+    $codes = [];
+    for ($i = 0; $i < $count; $i++) {
+        $code = strtoupper(bin2hex(random_bytes(5)));
+        $formattedCode = substr($code, 0, 4) . '-' . substr($code, 4, 4) . '-' . substr($code, 8, 2);
+        $codes[] = $formattedCode;
+    }
+    return $codes;
 }
 
 // ============================================
@@ -506,7 +729,6 @@ function validatePasswordStrength($password)
         $errors[] = 'Пароль должен содержать хотя бы одну цифру';
     }
 
-    // Проверка на распространенные пароли
     $commonPasswords = ['password', '123456', 'qwerty', 'admin', 'welcome'];
     if (in_array(strtolower($password), $commonPasswords)) {
         $errors[] = 'Этот пароль слишком распространен и ненадежен';
@@ -553,7 +775,6 @@ function checkSessionTimeout($timeoutMinutes = 15)
         isset($_SESSION['last_activity']) &&
         (time() - $_SESSION['last_activity']) > ($timeoutMinutes * 60)
     ) {
-        // Сессия истекла
         logout();
         return false;
     }
@@ -564,7 +785,6 @@ function checkSessionTimeout($timeoutMinutes = 15)
 
 function logSecurityEvent($event, $userId = null, $details = null)
 {
-    $logFile = 'security.log';
     $timestamp = date('Y-m-d H:i:s');
     $userId = $userId ?? (isset($_SESSION['user']) ? $_SESSION['user'] : 'guest');
     $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
@@ -580,7 +800,7 @@ function logSecurityEvent($event, $userId = null, $details = null)
         $details ?? 'none'
     );
 
-    file_put_contents($logFile, $logEntry, FILE_APPEND | LOCK_EX);
+    file_put_contents(SECURITY_LOG, $logEntry, FILE_APPEND | LOCK_EX);
 }
 
 function checkReferrer()
@@ -601,18 +821,13 @@ function checkReferrer()
 
 function initSecurity()
 {
-    // Проверка таймаута сессии
     checkSessionTimeout();
-
-    // Обновление времени активности
     updateLastActivity();
 
-    // Генерация CSRF токена, если его нет
     if (empty($_SESSION['csrf_token'])) {
         generateCSRFToken();
     }
 
-    // Проверка реферера для важных действий
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         checkReferrer();
     }

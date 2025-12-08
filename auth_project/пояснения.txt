@@ -15,6 +15,33 @@
 
 Открываем: http://localhost/auth_project/index.php
 
+Структура проекта:
+index.php - главная страница с навигацией
+register.php - регистрация пользователей с CSRF-защитой и валидацией
+config.php - основной конфигурационный файл со всеми функциями
+login.php - вход с обязательной 2FA (двухфакторной аутентификацией)
+reset_password.php - сброс пароля по токену
+
+Ключевые особенности:
+Файловое хранение данных (users.txt, reset_tokens.txt и т.д.)
+Обязательная двухфакторная аутентификация при каждом входе
+Защита от CSRF-атак
+Ограничение попыток входа (5 попыток за 15 минут)
+Безопасное хеширование паролей через password_hash()
+Логирование безопасност
+
+Особенности 2FA реализации:
+Использование TOTP (Time-based One-Time Password)
+Генерация QR-кодов для Google Authenticator
+Резервные коды для восстановления
+Обязательное применение при каждом входе
+
+Функции безопасности:
+escape() для защиты от XSS
+sanitizeInput() для очистки ввода
+validateCSRFToken() для защиты от CSRF
+logSecurityEvent() для аудита
+
 Стили оформления (style.css)
 Выход из системы (logout.php)
 Защищенная страница (dashboard.php)
@@ -35,6 +62,82 @@ auth_project/
 ├── style.css              # Стили для оформления
 └── users.txt              # Файл для хранения пользователей (аналог БД)
 
+1. dashboard.php - Личный кабинет
+Доступен только авторизованным пользователям
+Показывает информацию о пользователе и сессии
+Интерактивный таймер сессии (15 минут таймаут)
+JavaScript для отслеживания активности пользователя
+Уведомления о приближении таймаута сессии
+
+2. reset_password.php - Сброс пароля
+Валидация токена сброса пароля
+Форма установки нового пароля
+Валидация сложности пароля в реальном времени
+Интеграция с функциями из config.php
+
+3. logout.php - Выход из системы
+Простой скрипт для завершения сессии
+Использует функцию logout() из config.php
+Перенаправление на главную страницу
+
+4. register.php - Регистрация
+Форма регистрации с валидацией
+Проверка CSRF-токена
+Валидация сложности пароля
+JavaScript для проверки пароля в реальном времени
+
+Текущая структура системы:
+
+Система авторизации:
+├── Основные страницы:
+│   ├── index.php          - Главная
+│   ├── register.php       - Регистрация
+│   ├── login.php          - Вход (с обязательной 2FA)
+│   ├── dashboard.php      - Личный кабинет
+│   ├── reset_password.php - Сброс пароля
+│   └── logout.php         - Выход
+│
+├── Конфигурация:
+│   └── config.php         - Все функции системы
+│
+├── Хранение данных:
+│   ├── users.txt          - Пользователи
+│   ├── reset_tokens.txt   - Токены сброса
+│   ├── login_attempts.txt - Попытки входа
+│   └── security.log       - Лог безопасности
+│
+└── Особенности:
+    ├── Обязательная 2FA при каждом входе
+    ├── Защита от CSRF-атак
+    ├── Ограничение попыток входа (5 за 15 мин)
+    ├── Автоматический таймаут сессии (15 мин)
+    └── Детальное логирование
+
+Ключевые моменты:
+
+Сессии и авторизация:
+isLoggedIn() проверяет полную авторизацию (после 2FA)
+requires2FA() проверяет необходимость 2FA
+Сессии управляются через config.php
+
+Безопасность:
+Все формы защищены CSRF-токенами
+Пароли хешируются через password_hash()
+XSS защита через escape()
+IP блокировка при подозрительной активности
+
+Пользовательский интерфейс:
+Адаптивный дизайн
+Интерактивная валидация форм
+Уведомления в реальном времени
+Детальная информация о сессии
+
+Функциональность 2FA:
+Обязательная при каждом входе
+TOTP через Google Authenticator
+Резервные коды для восстановления
+QR-код для настройки
+
 Основные компоненты:
 config.php - ядро системы, содержит все функции безопасности
 users.txt - файловая "база данных" для хранения пользователей
@@ -47,280 +150,408 @@ style.css - стили оформления
 
 
 
-1. Подробный разбор config.php
-Запуск сессии
+ДЕТАЛЬНЫЙ РАЗБОР КАЖДОГО ФАЙЛА
+1. КОНФИГУРАЦИОННЫЙ ФАЙЛ (config.php) - ЯДРО СИСТЕМЫ
+1.1 Архитектура хранения данных
+php
+// Файловая архитектура (имитация базы данных)
+define('USERS_FILE', 'users.txt');           // Формат: username:email:hash:2fa_enabled:2fa_secret
+define('RESET_TOKENS_FILE', 'reset_tokens.txt'); // Формат: email:token:expires
+define('LOGIN_ATTEMPTS_FILE', 'login_attempts.txt'); // JSON структура
+define('SECURITY_LOG', 'security.log');      // Структурированное логирование
+Инновационный подход: Использование текстовых файлов как учебной альтернативы БД с полным сохранением принципов безопасности.
 
-session_start();
-session_start() инициализирует сессию PHP
-
-Сессия позволяет хранить данные пользователя между запросами
-Создает уникальный идентификатор сессии (session_id)
-Безопасно хранит данные на сервере, а не в браузере пользователя
-
-
-
-Хранение пользователей в файле:
-
-define('USERS_FILE', 'users.txt');
-
-Вместо реальной базы данных используем текстовый файл для простоты
-Каждая строка содержит: username:hashed_password
-В реальном проекте следует использовать MySQL/PostgreSQL
-
-
-Функция регистрации
-
-function registerUser($username, $password) {
-    if (userExists($username)) {
-        return ['success' => false, 'message' => 'Пользователь уже существует'];
-    }
-    
+1.2 Безопасное хеширование паролей
+php
+function registerUser($username, $email, $password) {
     $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
-    $userData = $username . ':' . $hashedPassword . PHP_EOL;
-    
-    if (file_put_contents(USERS_FILE, $userData, FILE_APPEND | LOCK_EX) !== false) {
-        return ['success' => true, 'message' => 'Регистрация успешна!'];
-    }
+    // Алгоритм автоматически выбирает bcrypt с оптимальной стоимостью
+}
+Технические преимущества:
+
+Автоматическая генерация уникальной соли для каждого пароля
+
+Адаптивная сложность вычислений (cost factor)
+
+Защита от timing-атак
+
+Будущая совместимость (автообновление алгоритма)
+
+Пример хеша: $2y$10$s8S5pF5sD9f8hG7jH6kL3u9w2E4rT6yU7i8O0p...
+
+$2y$ - алгоритм bcrypt
+
+10$ - стоимость вычислений (2^10 итераций)
+
+Соль и хеш - уникальны для каждого пользователя
+
+1.3 Система двухфакторной аутентификации
+Реализация TOTP (RFC 6238):
+
+php
+function generate2FASecret($length = 16) {
+    // Base32 алфавит для совместимости с Google Authenticator
+    $chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 }
 
+function verifyTOTP($secret, $code, $window = 1) {
+    // Проверка с допуском ±30 секунд
+    // SHA1 для совместимости, HMAC для безопасности
+}
+Генерация QR-кода:
 
-Ключевые моменты:
+php
+function generateQRCodeUrl($username, $secret, $issuer = 'AuthSystem') {
+    // Формат otpauth:// для автоматического распознавания
+    return "otpauth://totp/" . rawurlencode($issuer) . ":" . rawurlencode($username) . 
+           "?secret=" . $secret . "&issuer=" . rawurlencode($issuer);
+}
+1.4 Механизмы защиты
+CSRF-защита:
 
-userExists($username) - проверяет, не занято ли имя
-password_hash($password, PASSWORD_DEFAULT) - главная функция безопасности
+php
+function generateCSRFToken() {
+    return bin2hex(random_bytes(32)); // 64 символа, криптографически безопасно
+}
 
-Автоматически выбирает самый безопасный алгоритм (сейчас bcrypt)
-Добавляет "соль" (salt) автоматически
-Возвращает строку формата: $алгоритм$стоимость$соль$хеш
+function validateCSRFToken($token) {
+    // Использование hash_equals для защиты от timing-атак
+    return hash_equals($_SESSION['csrf_token'], $token);
+}
+Защита от брутфорс-атак:
 
-FILE_APPEND | LOCK_EX - флаги для безопасной записи:
-FILE_APPEND - добавляет в конец файла
-LOCK_EX - эксклюзивная блокировка файла на время записи
+php
+function isLoginBlocked($ip) {
+    // Блокировка после 5 неудачных попыток за 15 минут
+    $recentAttempts = array_filter($attempts, function ($attempt) {
+        return (time() - $attempt) < 900;
+    });
+    return count($recentAttempts) >= 5;
+}
+XSS-защита:
 
-Функция проверки пароля:
+php
+function escape($string) {
+    // ENT_QUOTES защищает и одинарные, и двойные кавычки
+    // UTF-8 для корректной обработки Unicode
+    return htmlspecialchars($string, ENT_QUOTES, 'UTF-8');
+}
+1.5 Сессионное управление
+php
+function checkSessionTimeout($timeoutMinutes = 15) {
+    if ((time() - $_SESSION['last_activity']) > ($timeoutMinutes * 60)) {
+        logout(); // Автоматический выход при неактивности
+        return false;
+    }
+    updateLastActivity(); // Обновление времени активности
+    return true;
+}
+2. СТРАНИЦА ВХОДА (login.php) - ИННОВАЦИОННЫЙ ПОДХОД
+2.1 Принцип обязательной 2FA
+php
+// Всегда требуем 2FA при каждом входе
+$is2FARequiredGlobally = true;
 
-function loginUser($username, $password) {
-    $users = file(USERS_FILE, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+// Проверка состояния 2FA пользователя
+if (isset($loginResult['user_id']) && is2FAEnabledById($loginResult['user_id'])) {
+    $_SESSION['twofa_pending_user'] = $loginResult['user_id'];
+    header('Location: verify_2fa.php');
+    exit;
+} else {
+    // Требуем настройки 2FA для новых пользователей
+    $message = 'Для входа необходимо настроить двухфакторную аутентификацию.';
+}
+2.2 Визуальные индикаторы безопасности
+Таймер блокировки: Обратный отсчет при превышении попыток
+
+Счетчик попыток: Отображение оставшихся попыток (5 из 5)
+
+Интерактивная валидация: Проверка в реальном времени
+
+Адаптивные сообщения: Контекстные подсказки
+
+2.3 JavaScript для улучшения UX
+javascript
+// Автоматический таймер разблокировки
+let timeLeft = 15 * 60;
+setInterval(function() {
+    timeLeft--;
+    countdownElement.textContent = 
+        Math.floor(timeLeft / 60).toString().padStart(2, '0') + ':' +
+        (timeLeft % 60).toString().padStart(2, '0');
+}, 1000);
+3. ПОДТВЕРЖДЕНИЕ 2FA (verify_2fa.php) - МИНИМАЛИСТИЧНЫЙ ДИЗАЙН
+3.1 Упрощенный интерфейс
+html
+<style>
+    body {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        /* Градиент для акцента на безопасности */
+    }
+    .code-input {
+        font-size: 32px;
+        letter-spacing: 10px;
+        /* Улучшение читаемости 6-значного кода */
+    }
+</style>
+3.2 Автоматизация ввода
+javascript
+// Автозавершение при вводе 6 цифр
+document.getElementById('code').addEventListener('input', function(e) {
+    if (this.value.length === 6) {
+        this.form.submit();
+    }
+});
+3.3 Защита от таймаута
+php
+// 5-минутное окно для ввода кода
+if ((time() - $_SESSION['twofa_pending_time']) > 300) {
+    unset($_SESSION['twofa_pending_user'], $_SESSION['twofa_pending_time']);
+    logSecurityEvent('2FA_TIMEOUT', $username);
+}
+4. НАСТРОЙКА 2FA (setup_2fa.php) - ПОШАГОВЫЙ ПРОЦЕСС
+4.1 Четыре этапа настройки:
+Установка приложения: Ссылки на Google Authenticator
+
+Сканирование QR-кода: Автогенерация + ручной ввод
+
+Подтверждение кода: Ввод 6-значного TOTP
+
+Сохранение резервных кодов: Генерация 8 уникальных кодов
+
+4.2 Генерация резервных кодов
+php
+function generateBackupCodes($count = 8) {
+    // Формат: XXXX-XXXX-XX для удобства запоминания
+    $code = strtoupper(bin2hex(random_bytes(5)));
+    return substr($code, 0, 4) . '-' . substr($code, 4, 4) . '-' . substr($code, 8, 2);
+}
+4.3 Отладочный режим
+html
+<div class="debug-panel">
+    <h4><i class="fas fa-bug"></i> Тестовый режим</h4>
+    <p>Текущий код: <strong id="currentCode"><?php echo getCurrentTOTPCode($secret); ?></strong></p>
+    <small>Код обновится через <span id="countdown">30</span> секунд</small>
+</div>
+5. ЛИЧНЫЙ КАБИНЕТ (dashboard.php) - МОНИТОРИНГ БЕЗОПАСНОСТИ
+5.1 Интерактивная панель
+Таймер сессии: Обратный отсчет 15-минутного таймаута
+
+Информация о сессии: ID, время входа, длительность
+
+Визуальные индикаторы: Цветовое кодирование статуса
+
+5.2 JavaScript для управления сессией
+javascript
+// Обновление времени каждую секунду
+setInterval(updateSessionTimer, 1000);
+
+// Отслеживание активности пользователя
+['click', 'keypress', 'scroll'].forEach(event => {
+    document.addEventListener(event, updateLastActivity);
+});
+5.3 Уведомления о безопасности
+javascript
+function showTimeoutNotification(seconds) {
+    // Всплывающее уведомление за 5 минут до таймаута
+    const notification = document.createElement('div');
+    notification.className = 'timeout-notification';
+    notification.innerHTML = `
+        <i class="fas fa-clock"></i>
+        <div>
+            <strong>Внимание!</strong>
+            <p>Сессия завершится через ${minutes} минут.</p>
+        </div>
+    `;
+}
+6. СМЕНА ПАРОЛЯ (change_password.php) - МНОГОУРОВНЕВАЯ ВАЛИДАЦИЯ
+6.1 Пять уровней проверки:
+CSRF-токен: Защита от межсайтовых запросов
+
+Текущий пароль: Подтверждение личности
+
+Длина пароля: Минимум 6 символов
+
+Совпадение паролей: Новый и подтверждающий
+
+Сложность пароля: В реальном времени
+
+6.2 Визуальная валидация
+javascript
+// Динамическая проверка требований
+passwordInput.addEventListener('input', function() {
+    const requirements = {
+        length: password.length >= 6,
+        upper: /[A-Z]/.test(password),
+        lower: /[a-z]/.test(password),
+        number: /\d/.test(password),
+        special: /[!@#$%^&*(),.?":{}|<>]/.test(password)
+    };
     
-    foreach ($users as $user) {
-        list($storedUsername, $storedHash) = explode(':', $user, 2);
-        
-        if ($storedUsername === $username) {
-            if (password_verify($password, $storedHash)) {
-                $_SESSION['user'] = $username;
-                $_SESSION['login_time'] = time();
-                return true;
-            }
-            break;
+    // Визуальное обновление иконок
+    Object.keys(requirements).forEach(req => {
+        const icon = document.getElementById(`req-${req}`).querySelector('i');
+        icon.className = requirements[req] ? 'fas fa-check-circle' : 'fas fa-circle';
+        icon.style.color = requirements[req] ? '#27ae60' : '#95a5a6';
+    });
+});
+6.3 Логирование изменений
+php
+if (password_verify($currentPassword, $data[2])) {
+    logSecurityEvent('PASSWORD_CHANGE_SUCCESS', $username);
+} else {
+    logSecurityEvent('PASSWORD_CHANGE_FAILED', $username, 'Wrong current password');
+}
+7. РЕГИСТРАЦИЯ (register.php) - КОМПЛЕКСНАЯ ВАЛИДАЦИЯ
+7.1 Проверочные критерии:
+Критерий	Минимум	Описание
+Имя пользователя	3 символа	Уникальность, без спецсимволов
+Email	Валидный формат	Уникальность, FILTER_VALIDATE_EMAIL
+Пароль	6 символов	Сложность: верхний/нижний регистр, цифры, спецсимволы
+Подтверждение	Совпадение	Точное соответствие с основным паролем
+7.2 Асинхронная проверка
+javascript
+// Проверка совпадения паролей в реальном времени
+function checkPasswordMatch() {
+    if (password === confirm && password.length >= 6) {
+        confirmPasswordInput.style.borderColor = '#27ae60';
+        confirmPasswordInput.style.boxShadow = '0 0 0 2px rgba(39, 174, 96, 0.2)';
+    } else {
+        confirmPasswordInput.style.borderColor = '#e74c3c';
+        confirmPasswordInput.style.boxShadow = '0 0 0 2px rgba(231, 76, 60, 0.2)';
+    }
+}
+8. ВОССТАНОВЛЕНИЕ ПАРОЛЯ (forgot_password.php + reset_password.php)
+8.1 Двухэтапный процесс:
+Этап 1 - Запрос сброса:
+
+php
+$token = bin2hex(random_bytes(32)); // 64-символьный криптографический токен
+$expires = time() + 3600; // Действителен 1 час
+$resetLink = "http://" . $_SERVER['HTTP_HOST'] . "/reset_password.php?token=$token";
+Этап 2 - Установка нового пароля:
+
+Валидация токена и срока действия
+
+Проверка сложности нового пароля
+
+Однократное использование токена
+
+8.2 Безопасность токенов
+php
+function validateResetToken($token) {
+    foreach ($tokens as $line) {
+        list($email, $storedToken, $expires) = explode(':', $line);
+        if ($storedToken === $token && $expires > time()) {
+            return $email; // Токен валиден и не истек
         }
     }
     return false;
 }
+9. ГЛАВНАЯ СТРАНИЦА (index.php) - ИНФОРМАЦИОННЫЙ ХАБ
+9.1 Адаптивный контент
+php
+<?php if (isLoggedIn()): ?>
+    <!-- Для авторизованных пользователей -->
+    <div class="success-message">
+        <h3><i class="fas fa-check-circle"></i> Вы успешно вошли в систему!</h3>
+        <a href="dashboard.php" class="btn btn-primary">Перейти в личный кабинет</a>
+    </div>
+<?php else: ?>
+    <!-- Для гостей -->
+    <div class="info-message">
+        <h3><i class="fas fa-info-circle"></i> Для доступа к полному функционалу</h3>
+        <a href="login.php" class="btn btn-primary">Войти в систему</a>
+    </div>
+<?php endif; ?>
+ТЕХНОЛОГИЧЕСКИЕ ИННОВАЦИИ СИСТЕМЫ
+1. Обязательная 2FA - Уникальная особенность
+Проблема традиционных систем: 2FA как опция, которую пользователи игнорируют
+Наше решение: 2FA как обязательное требование, обеспечивающее:
 
+Защиту от утечек паролей
 
-Важные детали:
+Предотвращение несанкционированного доступа
 
-password_verify($password, $storedHash) - вторая главная функция безопасности
+Соответствие современным стандартам безопасности
 
-Сравнивает введенный пароль с хранящимся хешем
-Автоматически определяет алгоритм и соль из хеша
-Защищена от timing-атак (время проверки не зависит от успешности)
+2. Файловая архитектура - Учебный подход
+Преимущества для обучения:
 
-$_SESSION['user'] = $username - сохраняем имя пользователя в сессии
-$_SESSION['login_time'] = time() - запоминаем время входа для отображения в ЛК
+Понятность структуры данных
 
-Почему password_hash() безопаснее md5() или sha1()?
+Отсутствие зависимостей от СУБД
 
-Функция	            Соль	Стоимость	Адаптивность	Рекомендация
-md5()	            Нет	        Нет	        Нет	        НЕ ИСПОЛЬЗОВАТЬ
-sha1()	            Нет	        Нет	        Нет	        НЕ ИСПОЛЬЗОВАТЬ
-password_hash()	    Авто	Да	        Да	        РЕКОМЕНДУЕТСЯ
+Легкость отладки и модификации
 
+Демонстрация принципов без сложностей администрирования БД
 
-Особенности password_hash():
+3. Комплексная система логирования
+Формат лога: [ВРЕМЯ] СОБЫТИЕ | User: USER | IP: IP | UA: USER_AGENT | Details: ДЕТАЛИ
 
-Автоматическая соль - каждый хеш уникален, даже для одинаковых паролей
-Адаптивная стоимость - можно настраивать сложность вычислений
-Защита от перебора - вычисление одного хеша занимает ~0.1 секунды
-Будущая совместимость - алгоритм можно менять без изменения кода
+Пример записи:
 
-Функция защиты от XSS:
+text
+[2025-12-08 15:40:49] PASSWORD_CHANGE_SUCCESS | User: andrew_2 | IP: ::1 | UA: Chrome | Details: none
+4. Адаптивный и доступный интерфейс
+Mobile-first дизайн: Корректное отображение на любых устройствах
 
-function escape($string) {
-    return htmlspecialchars($string, ENT_QUOTES, 'UTF-8');
+ARIA-атрибуты: Улучшение доступности для пользователей с ограниченными возможностями
+
+Интуитивная навигация: Четкая структура меню и действий
+
+МЕХАНИЗМЫ БЕЗОПАСНОСТИ: ГЛУБОКИЙ АНАЛИЗ
+1. Защита от атак типа "человек посередине"
+php
+function checkReferrer() {
+    $allowedDomains = [$_SERVER['HTTP_HOST']];
+    $referrerHost = parse_url($_SERVER['HTTP_REFERER'], PHP_URL_HOST);
+    
+    if (!in_array($referrerHost, $allowedDomains)) {
+        logSecurityEvent('POSSIBLE_PHISHING_ATTEMPT', null, $_SERVER['REMOTE_ADDR']);
+        return false;
+    }
+    return true;
 }
+2. Сессионная безопасность
+Regenerate ID: После успешной аутентификации
 
-Что защищает:
-Преобразует < в &lt;
-Преобразует > в &gt;
-Преобразует " в &quot;
-Преобразует ' в &#039;
-Защищает от вставки вредоносного JavaScript
+HttpOnly флаги: Защита от XSS-краж cookies
 
+SameSite атрибуты: Предотвращение CSRF через cookies
 
-
-
-
-
-
-2. Регистрация (register.php)
-Валидация данных
-
-if (empty($username) || empty($password)) {
-    $message = 'Все поля обязательны';
-} elseif (strlen($username) < 3) {
-    $message = 'Имя должно быть от 3 символов';
-} elseif (strlen($password) < 6) {
-    $message = 'Пароль должен быть от 6 символов';
-} elseif ($password !== $confirm_password) {
-    $message = 'Пароли не совпадают';
+3. Валидация входных данных
+php
+function sanitizeInput($input) {
+    if (is_array($input)) {
+        return array_map('sanitizeInput', $input); // Рекурсивная обработка массивов
+    }
+    $input = trim($input);
+    $input = strip_tags($input); // Удаление HTML/XML тегов
+    $input = htmlspecialchars($input, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    return $input;
 }
-
-
-Правила валидации:
-Все поля обязательны
-Имя пользователя минимум 3 символа
-Пароль минимум 6 символов
-Пароль и подтверждение должны совпадать
-
-Безопасность формы
-
-<input type="password" id="password" name="password" required minlength="6">
-type="password" - скрывает ввод символов
-
-required - обязательное поле (валидация на стороне браузера)
-minlength="6" - минимальная длина (валидация на стороне браузера)
-
-
-
-3. Вход в систему (login.php)
-
-Защита от прямого доступа
-
-if (isLoggedIn()) {
-    header('Location: index.php');
-    exit;
-}
-
-Если пользователь уже вошел, перенаправляем на главную
-exit обязателен после header() для прекращения выполнения скрипта
-
-Процесс аутентификации
-
-if (loginUser($username, $password)) {
-    header('Location: index.php');
-    exit;
-} else {
-    $message = 'Неверное имя пользователя или пароль';
-}
-
-Важно: Мы не говорим, что именно неверно (имя или пароль), чтобы не помогать злоумышленникам.
-
-
-
-4. Защищенная страница (dashboard.php)
-
-Проверка авторизации
-
-if (!isLoggedIn()) {
-    header('Location: login.php');
-    exit;
-}
-
-Защита от неавторизованного доступа
-Редирект на страницу входа
-
-Отображение информации о сессии
-
-$loginTime = $_SESSION['login_time'];
-$sessionDuration = time() - $loginTime;
-
-Показываем пользователю, когда он вошел
-Показываем, сколько длится сессия
-Улучшает пользовательский опыт
-
-
-6. Выход из системы (logout.php)
-
-Безопасное завершение сессии
-
-function logout() {
-    session_unset();    // Удаляем все переменные сессии
-    session_destroy();  // Уничтожаем сессию
-}
-
-Почему нужно делать и unset, и destroy?
-session_unset() - очищает данные сессии в текущем скрипте
-session_destroy() - удаляет сессию на сервере
-Комбинация гарантирует полный выход
-
-
-
-7. Безопасность сессий
-
-Как работает сессия PHP:
-
-Пользователь → Браузер → Cookie (session_id) → Сервер → Файл сессии
-
-Защитные механизмы:
-Session ID - случайная строка (32 символа)
-
-Хранение на сервере - данные не передаются клиенту
-Время жизни - сессия автоматически завершается через 24 минуты неактивности
-
-8. Уязвимости и их предотвращение
-
-SQL-инъекции - не актуально в нашем проекте
-Мы используем файл, а не БД
-В реальном проекте нужно использовать prepared statements
-
-
-XSS (межсайтовый скриптинг)
-
-echo escape($username);  // Вместо echo $username;
-Всегда экранируем вывод пользовательских данных
-
-CSRF (межсайтовая подделка запроса)
-
-В нашем проекте не реализована защита
-В реальном проекте нужны CSRF-токены
-
-Сессионный захват
-
-PHP автоматически генерирует сложные session_id
-Для большей безопасности можно использовать session_regenerate_id()
-
-Рекомендации для улучшения
-
-Для учебного проекта:
-
-Добавить подтверждение email
-Реализовать "Запомнить меня"
-Добавить капчу при регистрации
-Валидировать email-адрес
-
-Для production:
-
-Использовать базу данных (MySQL/PostgreSQL)
-Реализовать сброс пароля
-Добавить двухфакторную аутентификацию
-Внедрить ограничение попыток входа
-Использовать HTTPS
-Реализовать CSRF-токены
-
-10. Демонстрация работы функций безопасности
-
-Пример работы password_hash():
-
-$password = "mypassword123";
-$hash1 = password_hash($password, PASSWORD_DEFAULT);
-Результат: $2y$10$s8S5pF5sD9f8hG7jH6kL3u9w2E4rT6yU7i8O0p...
-
-$hash2 = password_hash($password, PASSWORD_DEFAULT);
-Результат: $2y$10$d9H5jK8lS2f4G6hJ7kL9m1n3P5rT7yU8i0O...
-Хеши РАЗНЫЕ, хотя пароль ОДИН И ТОТ ЖЕ!
-
-Проверка:
-password_verify("mypassword123", $hash1); // true
-password_verify("mypassword123", $hash2); // true
-password_verify("wrongpassword", $hash1); // false
+СЦЕНАРИИ ИСПОЛЬЗОВАНИЯ ДЛЯ ДЕМОНСТРАЦИИ
+Сценарий 1: Полный цикл нового пользователя
+text
+1. Регистрация → 2. Вход → 3. Настройка 2FA → 
+4. Вход с 2FA → 5. Личный кабинет → 6. Смена пароля
+Сценарий 2: Восстановление доступа
+text
+1. Запрос сброса → 2. Получение токена → 
+3. Установка нового пароля → 4. Вход с 2FA
+Сценарий 3: Атака и защита
+text
+1. Брутфорс пароля → Блокировка IP
+2. CSRF атака → Невалидный токен
+3. XSS инъекция → Экранированный вывод
+4. Фишинг → Проверка реферера
+КОМПАРАТИВНЫЙ АНАЛИЗ С ТРАДИЦИОННЫМИ СИСТЕМАМИ
+Критерий	Традиционная система	Наша система
+2FA	Опциональна	Обязательна при каждом входе
+Хранение паролей	md5/sha1	password_hash() с bcrypt
+Защита от CSRF	Частичная	Полная, токены для всех форм
+Логирование	Базовое	Детальное, структурированное
+UX/UI	Статичный	Интерактивный, адаптивный
+Масштабируемость	Сложная	Готовность к миграции на БД
+; // false
