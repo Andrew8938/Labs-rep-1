@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>Лабораторная №9 — Среднее арифметическое</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; max-width: 700px; }
+    label { display: block; margin-top: 10px; }
+    input[type="number"] { width: 120px; padding: 6px; }
+    .result { margin-top: 20px; padding: 12px; border-radius: 6px; background: #f0f0f0; }
+    .error { color: #a00; }
+  </style>
+</head>
+<body>
+  <h2>Вычисление среднего арифметического трёх чисел</h2>
+  <form action="process.php" method="post">
+    <label>Число 1:
+      <input type="number" step="any" name="a" required>
+    </label>
+
+    <label>Число 2:
+      <input type="number" step="any" name="b" required>
+    </label>
+
+    <label>Число 3:
+      <input type="number" step="any" name="c" required>
+    </label>
+
+    <br>
+    <input type="submit" value="Вычислить">
+  </form>
+
+  <p style="margin-top:18px; color:#555;">Подсказка: можно вводить целые и дробные числа (через точку).</p>
+</body>
+</html>
